@@ -2,7 +2,6 @@ import pandas as pd
 import time
 import os
 import numpy as np
-import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
 from PIL import Image
@@ -11,6 +10,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.autograd import Variable
 import torch
+import cProfile
+from pstats import Stats
 
 class PicDataset(Dataset):
     """picture dataset."""
@@ -38,20 +39,49 @@ class PicDataset(Dataset):
             transforms.Resize((32,32)),
             transforms.ToTensor(),
         ])
+        self.total_io = 0
+        self.total_pp = 0
+        self.total_load = 0
 
     def __len__(self):
         return len(self.pics_frame)
 
-    def __getitem__(self, idx):
+    def io(self, idx):
+        start = time.monotonic()
         img_name = os.path.join(self.root_dir,
                                 self.pics_frame.iloc[idx, 0])+".jpg"
-        image = self.tf(Image.open(img_name))
-        image = image[:3,:,:]
+        img = Image.open(img_name)
+        end = time.monotonic()
+        self.total_io += (end - start)
         tag = self.pics_frame.iloc[idx, 1]
         label = self.labels[tag]
-        sample = {'image': image, 'tag': tag, 'label':label}
+        sample = {'image': img, 'tag': tag, 'label':label}
+        if idx == (self.__len__() - 1):
+            print("TOTAL IO TIME FOR EPOCH %s" %self.total_io)
+        return(sample)
 
+    def preprocess(self, sample, idx):
+        start = time.monotonic()
+        img = self.tf(sample['image'])
+        img = img[:3,:,:]
+        sample['image'] = img
+        end = time.monotonic()
+        self.total_pp += (end - start)
+        if idx == (self.__len__() - 1):
+            print("TOTAL PREPROCESS TIME FOR EPOCH %s" %self.total_pp)
         return sample
+
+    def __getitem__(self, idx):
+
+        start = time.monotonic()
+        sample = self.io(idx)
+        new_sample = self.preprocess(sample, idx)
+        end = time.monotonic()
+        self.total_load += (end - start)
+        if idx == (self.__len__() - 1):
+            print("TOTAL LOAD TIME FOR EPOCH %s" %self.total_load)
+        return new_sample
+
 
 class PicClassifier(nn.Module):
 
@@ -75,33 +105,39 @@ TRAIN_FILE = "/scratch/am9031/CSCI-GA.3033-023/kaggleamazon/train.csv"
 TEST_FILE = "/scratch/am9031/CSCI-GA.3033-023/kaggleamazon/test.csv"
 PIC_DIR = "/scratch/am9031/CSCI-GA.3033-023/kaggleamazon/train-jpg"
 BATCH_SIZE = 100
-
+NUM_WORKERS = 16 
+NUM_EPOCHS = 10
 def main():
 
-    print(torch.cuda.is_available())
     train_dataset = PicDataset(LABEL_FILE, TRAIN_FILE, PIC_DIR)
     test_dataset = PicDataset(LABEL_FILE, TEST_FILE, PIC_DIR)
     train_dl = DataLoader(
-        train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=1
+        train_dataset, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS
     )
     test_dl = DataLoader(
-        test_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=1
+        test_dataset, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS
     )
-    picClassifier = PicClassifier(num_labels = 17, batch_size=BATCH_SIZE) 
-    picClassifier.cuda()
+    picClassifier = PicClassifier(num_labels = 17,
+                                  batch_size=BATCH_SIZE).cuda() 
+    #picClassifier = PicClassifier(num_labels = 17,
+    #                              batch_size=BATCH_SIZE) 
     
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(picClassifier.parameters(), lr=.01, momentum=.9)
+    optimizer = optim.SGD(picClassifier.parameters(), lr=.01, momentum=2)
 
-    for epoch in range(5):
+    epoch_start_time = time.monotonic() 
+
+    start = time.monotonic()
+    for epoch in range(NUM_EPOCHS):
+        print("RUNNING EPOCH %s" %epoch)
 
         running_loss = 0.0
         for i, data in enumerate(train_dl, 0):
 
-            dl_end_time = time.monotonic()
-
-            inputs = Variable(data['image'].cuda())
-            tags = Variable(data['tag'].cuda())
+            inputs = Variable(data['image']).cuda()
+            #inputs = Variable(data['image'])
+            tags = Variable(data['tag']).cuda()
+            #tags = Variable(data['tag'])
             #labels = data['label']
 
             optimizer.zero_grad()
@@ -111,16 +147,25 @@ def main():
             optimizer.step()
 
             running_loss += loss.data[0]
-            if ((i % 20) == 19):
-                print('[%d, %5d] loss: %.3f' %
-                      (epoch +1, i + 1, running_loss / 20))
-                running_loss = 0.0
+#            if ((i % 20) == 19):
+#                print('[%d, %5d] loss: %.3f' %
+#                      (epoch +1, i + 1, running_loss / 20))
+#                running_loss = 0.0
 
-            dl_start_time = time.monotonic()
+    end = time.monotonic()
+    print("TOTAL TIME FOR ALL EPOCHS %s" %(end-start))
+    print("AVG TIME FOR AN EPOCHS %s" %(float(end-start)/NUM_EPOCHS))
 
            
 if __name__ == "__main__":
+#    cProfile.run('main()', 'C7.stats')
+#
+#    with open('pytorch_stats.txt', 'wt') as output:
+#        stats = Stats('C7.stats')
+#        stats.sort_stats('cumulative', 'time')
+#        stats.print_stats()
     main()
+
 
 
 
