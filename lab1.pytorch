@@ -13,8 +13,16 @@ import torch
 import cProfile
 from pstats import Stats
 
+LABEL_FILE = "/scratch/am9031/CSCI-GA.3033-023/kaggleamazon/labels.txt"
+TRAIN_FILE = "/scratch/am9031/CSCI-GA.3033-023/kaggleamazon/train.csv"
+TEST_FILE = "/scratch/am9031/CSCI-GA.3033-023/kaggleamazon/test.csv"
+PIC_DIR = "/scratch/am9031/CSCI-GA.3033-023/kaggleamazon/train-jpg"
+BATCH_SIZE = 100
+NUM_WORKERS = 16 
+NUM_EPOCHS = 10
+
 class PicDataset(Dataset):
-    """picture dataset."""
+    """picture dataset class."""
 
     def __init__(self, label_file, pic_file, root_dir):
         """
@@ -22,8 +30,6 @@ class PicDataset(Dataset):
             label_file (string): Path to the csvfile with tag-label pairings.
             pic_file (string): Path to the csv file with names and tags.
             root_dir (string): Directory with all the images.
-            transform (callable, optional): Optional transform to be applied
-                on a sample.
         """
         labels = {}
 
@@ -47,6 +53,10 @@ class PicDataset(Dataset):
         return len(self.pics_frame)
 
     def io(self, idx):
+        '''
+        function that performs io of image data
+        '''
+
         start = time.monotonic()
         img_name = os.path.join(self.root_dir,
                                 self.pics_frame.iloc[idx, 0])+".jpg"
@@ -61,6 +71,9 @@ class PicDataset(Dataset):
         return(sample)
 
     def preprocess(self, sample, idx):
+        '''
+        function that preforms preprocessing of image data
+        '''
         start = time.monotonic()
         img = self.tf(sample['image'])
         img = img[:3,:,:]
@@ -72,6 +85,10 @@ class PicDataset(Dataset):
         return sample
 
     def __getitem__(self, idx):
+        '''
+        __getitem__ overwritten as required by DataLoader class.  calls self.io
+        and self.preprocess and then returns resulting sample
+        '''
 
         start = time.monotonic()
         sample = self.io(idx)
@@ -84,6 +101,10 @@ class PicDataset(Dataset):
 
 
 class PicClassifier(nn.Module):
+    '''
+    Feed forward model.  Composed of two layers and two Relu Activation
+    functions and softmax output
+    '''
 
     def __init__(self, num_labels, batch_size):
         super(PicClassifier, self).__init__()
@@ -100,13 +121,7 @@ class PicClassifier(nn.Module):
         x = F.softmax(self.layer3(x), dim=0)
         return x
 
-LABEL_FILE = "/scratch/am9031/CSCI-GA.3033-023/kaggleamazon/labels.txt"
-TRAIN_FILE = "/scratch/am9031/CSCI-GA.3033-023/kaggleamazon/train.csv"
-TEST_FILE = "/scratch/am9031/CSCI-GA.3033-023/kaggleamazon/test.csv"
-PIC_DIR = "/scratch/am9031/CSCI-GA.3033-023/kaggleamazon/train-jpg"
-BATCH_SIZE = 100
-NUM_WORKERS = 16 
-NUM_EPOCHS = 10
+
 def main():
 
     train_dataset = PicDataset(LABEL_FILE, TRAIN_FILE, PIC_DIR)
@@ -119,8 +134,6 @@ def main():
     )
     picClassifier = PicClassifier(num_labels = 17,
                                   batch_size=BATCH_SIZE).cuda() 
-    #picClassifier = PicClassifier(num_labels = 17,
-    #                              batch_size=BATCH_SIZE) 
     
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(picClassifier.parameters(), lr=.01, momentum=2)
@@ -135,10 +148,7 @@ def main():
         for i, data in enumerate(train_dl, 0):
 
             inputs = Variable(data['image']).cuda()
-            #inputs = Variable(data['image'])
             tags = Variable(data['tag']).cuda()
-            #tags = Variable(data['tag'])
-            #labels = data['label']
 
             optimizer.zero_grad()
             outputs = picClassifier(inputs)  
